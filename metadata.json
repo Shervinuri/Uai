@@ -1,0 +1,7 @@
+{
+  "name": "SHΞN™ Agent Monitor",
+  "description": "Advanced User Agent and Device Fingerprinting Tool. Monitors device hardware, network, and browser signatures.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
