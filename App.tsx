@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
-  FiSmartphone, FiCpu, FiWifi, FiMapPin, FiBattery, FiCode, FiEye, FiShield
+  FiSmartphone, FiCpu, FiWifi, FiMapPin, FiBattery, FiCode, FiEye, FiShield, FiAlertTriangle
 } from 'react-icons/fi';
 import Footer from './components/Footer';
 import InfoBlock, { DataRow } from './components/InfoBlock';
@@ -10,15 +10,23 @@ import { DeviceData, BatteryManager } from './types';
 const App: React.FC = () => {
   const [data, setData] = useState<DeviceData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
+  // Initial Data Load
   useEffect(() => {
     const fetchData = async () => {
-      // Simulate "scanning" delay for effect
-      await new Promise(resolve => setTimeout(resolve, 800));
-      const deviceData = await collectDeviceData();
-      deviceData.fingerprint = generateFingerprint(deviceData);
-      setData(deviceData);
-      setLoading(false);
+      try {
+        // Simulate "scanning" delay for effect
+        await new Promise(resolve => setTimeout(resolve, 800));
+        const deviceData = await collectDeviceData();
+        deviceData.fingerprint = generateFingerprint(deviceData);
+        setData(deviceData);
+        setLoading(false);
+      } catch (err) {
+        console.error("Initialization Failed:", err);
+        setError("CRITICAL_FAILURE: Unable to probe device sensors.");
+        setLoading(false);
+      }
     };
 
     fetchData();
@@ -26,40 +34,46 @@ const App: React.FC = () => {
 
   // Real-time Battery Monitoring
   useEffect(() => {
-    if (loading || !navigator.getBattery) return;
+    // Only run if we have data and API support
+    if (loading || error || !navigator.getBattery) return;
 
-    let battery: BatteryManager;
+    let batteryManager: BatteryManager | null = null;
 
-    const updateBattery = () => {
-      if (!battery) return;
+    const updateBatteryState = () => {
+      if (!batteryManager) return;
+      
       setData(prevData => {
         if (!prevData) return null;
+        // Deep copy to ensure React detects change
         return {
           ...prevData,
           battery: {
-            level: Math.round(battery.level * 100),
-            charging: battery.charging
+            level: Math.round(batteryManager!.level * 100),
+            charging: batteryManager!.charging
           }
         };
       });
     };
 
     navigator.getBattery().then(bat => {
-      battery = bat;
-      bat.addEventListener('levelchange', updateBattery);
-      bat.addEventListener('chargingchange', updateBattery);
-      
-      // Ensure initial sync in case it changed during load
-      updateBattery();
+      batteryManager = bat;
+      // Attach Listeners
+      bat.addEventListener('levelchange', updateBatteryState);
+      bat.addEventListener('chargingchange', updateBatteryState);
+      // Initial sync
+      updateBatteryState();
+    }).catch(e => {
+      console.warn("Battery API Access Denied:", e);
     });
 
+    // Cleanup
     return () => {
-      if (battery) {
-        battery.removeEventListener('levelchange', updateBattery);
-        battery.removeEventListener('chargingchange', updateBattery);
+      if (batteryManager) {
+        batteryManager.removeEventListener('levelchange', updateBatteryState);
+        batteryManager.removeEventListener('chargingchange', updateBatteryState);
       }
     };
-  }, [loading]);
+  }, [loading, error]);
 
   if (loading) {
     return (
@@ -70,6 +84,22 @@ const App: React.FC = () => {
         <div className="w-64 h-1 bg-gray-800 rounded overflow-hidden">
           <div className="h-full bg-shen-accent animate-progress"></div>
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-shen-black flex flex-col items-center justify-center p-4 text-center">
+        <FiAlertTriangle className="text-red-500 mb-4" size={64} />
+        <h1 className="text-2xl font-bold text-red-500 mb-2">SYSTEM ERROR</h1>
+        <p className="text-gray-400 font-mono mb-6">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="px-6 py-2 bg-red-900/20 border border-red-500 text-red-400 rounded hover:bg-red-900/40 transition-colors"
+        >
+          RETRY_CONNECTION
+        </button>
       </div>
     );
   }
@@ -157,13 +187,23 @@ const App: React.FC = () => {
 
             {/* Battery & Status */}
             <InfoBlock title="Power Status" icon={FiBattery} delay={600}>
-              <div className="relative">
-                <DataRow label="Battery Level" value={data.battery.level >= 0 ? `${data.battery.level}%` : 'Unknown'} highlight />
-                <div className="absolute right-0 top-0 h-full flex items-center pr-16 opacity-30">
-                  <div className={`w-2 h-2 rounded-full ${data.battery.charging ? 'bg-green-500 animate-pulse' : 'bg-transparent'}`}></div>
+              <div className="mb-3">
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-gray-400">BATTERY LEVEL</span>
+                  <span className={`font-mono ${data.battery.charging ? 'text-shen-accent animate-pulse' : 'text-white'}`}>
+                    {data.battery.level >= 0 ? `${data.battery.level}%` : 'N/A'}
+                    {data.battery.charging && ' ⚡'}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-500 ${data.battery.level < 20 ? 'bg-red-500' : 'bg-shen-accent'}`}
+                    style={{ width: `${data.battery.level >= 0 ? data.battery.level : 0}%` }}
+                  ></div>
                 </div>
               </div>
-              <DataRow label="Charging" value={data.battery.charging ? 'Yes ⚡' : 'No'} />
+              
+              <DataRow label="Charging Status" value={data.battery.charging ? 'Active' : 'Discharging'} />
               <DataRow label="Language" value={navigator.language} />
               <DataRow label="Cookies Enabled" value={navigator.cookieEnabled ? 'Yes' : 'No'} />
             </InfoBlock>

@@ -4,6 +4,7 @@ import { DeviceData } from '../types';
 export const getIP = async (): Promise<{ ip: string; city?: string; country?: string }> => {
   try {
     const response = await fetch('https://ipapi.co/json/');
+    if (!response.ok) throw new Error('IP Fetch failed');
     const data = await response.json();
     return { ip: data.ip, city: data.city, country: data.country_name };
   } catch (e) {
@@ -30,29 +31,49 @@ export const getGPUInfo = (): { vendor: string; renderer: string } => {
 };
 
 export const generateFingerprint = (data: Partial<DeviceData>): string => {
-  const str = JSON.stringify({
-    ua: data.ua,
-    screen: data.screen,
-    gpu: data.gpu,
-    cpu: data.cpu,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-  });
-  
-  // Simple hash for demo purposes (DJB2)
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) + hash) + str.charCodeAt(i); 
+  try {
+    const str = JSON.stringify({
+      ua: data.ua,
+      screen: data.screen,
+      gpu: data.gpu,
+      cpu: data.cpu,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    });
+    
+    // Simple hash for demo purposes (DJB2)
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash) + str.charCodeAt(i); 
+    }
+    return (hash >>> 0).toString(16).toUpperCase();
+  } catch (e) {
+    return "UNKNOWN_ID";
   }
-  return (hash >>> 0).toString(16).toUpperCase();
 };
 
 export const collectDeviceData = async (): Promise<DeviceData> => {
-  const parser = new UAParser();
-  const result = parser.getResult();
+  // Safe UA Parsing to prevent crash if library import fails or is incompatible
+  let uaResult: any = { 
+    ua: navigator.userAgent,
+    browser: {}, 
+    os: {}, 
+    device: {}, 
+    cpu: {}, 
+    engine: {} 
+  };
+
+  try {
+    const parser = new UAParser();
+    uaResult = parser.getResult();
+  } catch (e) {
+    console.error("UA Parser initialization failed:", e);
+    // Continue with default empty values
+  }
+
   const gpu = getGPUInfo();
   const ipData = await getIP();
 
-  // Battery
+  // Battery Initial Check
   let batteryData = { level: -1, charging: false };
   if (navigator.getBattery) {
     try {
@@ -65,24 +86,24 @@ export const collectDeviceData = async (): Promise<DeviceData> => {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   
   return {
-    ua: result.ua,
+    ua: uaResult.ua,
     browser: {
-      name: result.browser.name || 'Unknown',
-      version: result.browser.version || 'Unknown',
-      engine: result.engine.name || 'Unknown'
+      name: uaResult.browser.name || 'Unknown',
+      version: uaResult.browser.version || 'Unknown',
+      engine: uaResult.engine.name || 'Unknown'
     },
     os: {
-      name: result.os.name || 'Unknown',
-      version: result.os.version || 'Unknown',
+      name: uaResult.os.name || 'Unknown',
+      version: uaResult.os.version || 'Unknown',
       platform: navigator.platform
     },
     device: {
-      vendor: result.device.vendor || 'PC/Generic',
-      model: result.device.model || 'Unknown Device',
-      type: result.device.type || 'Desktop'
+      vendor: uaResult.device.vendor || 'PC/Generic',
+      model: uaResult.device.model || 'Unknown Device',
+      type: uaResult.device.type || 'Desktop'
     },
     cpu: {
-      architecture: result.cpu.architecture || 'Unknown',
+      architecture: uaResult.cpu.architecture || 'Unknown',
       cores: navigator.hardwareConcurrency || 0
     },
     gpu: gpu,
@@ -91,7 +112,7 @@ export const collectDeviceData = async (): Promise<DeviceData> => {
       height: window.screen.height,
       colorDepth: window.screen.colorDepth,
       pixelRatio: window.devicePixelRatio,
-      orientation: screen.orientation ? screen.orientation.type : 'Unknown'
+      orientation: (screen.orientation && screen.orientation.type) ? screen.orientation.type : 'Unknown'
     },
     network: {
       ip: ipData.ip,
